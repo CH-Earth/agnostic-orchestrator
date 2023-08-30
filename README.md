@@ -108,6 +108,11 @@ As is shown in the `JSON` block above:
   3. And finally, the order of job submission to the SLURM scheduler is
      given, with `order` values of `-1` indicating independant jobs.
 
+# A real-world example
+An example to prepare meteorological and geospatial datasets to prepare
+`MESH` hydrological/land-surface model is given in the [example](./example)
+directory of the current repository.
+
 # Support
 Please open a new ticket on the Issues tab of the current repository in case of any problem.
 
