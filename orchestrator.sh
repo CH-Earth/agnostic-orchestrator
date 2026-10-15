@@ -18,8 +18,8 @@
 # input variables
 conf="$1"
 
-# logging date string
-dateLog="$(date +'%Y%m%d_%H%M%S')"
+# logging date string (the PID makes concurrent runs unique)
+dateLog="$(date +'%Y%m%d_%H%M%S')_$$"
 
 # global variables
 log="$(dirname "$0")/orchestrator_${dateLog}.log"
@@ -77,6 +77,7 @@ submit_job () {
   local executable=$2
   local arg=$3
   local dependency_ids=$4
+  local cache_label=$5
   local submission_script_name parsable_line dependency_line
 
   if [[ "$submission_script" != "" ]]; then
@@ -84,8 +85,11 @@ submit_job () {
     # script
     parsable_line="#SBATCH --parsable"
 
-    # Make a temporary file in the cache
-    submission_script_name="$(basename "$submission_script")"
+    # Make a temporary file in the cache; the label keeps every cached
+    # template unique per submission, so templates that share a basename
+    # do not overwrite each other
+    cache_label="${cache_label//\//_}"
+    submission_script_name="${cache_label}.$(basename "$submission_script")"
     cp "$submission_script" "${cache}/${submission_script_name}"
 
     # add the prepared line(s) to the file; the dependency line is only
@@ -209,6 +213,13 @@ if [[ -n "$badValues" ]]; then
   exit 1
 fi
 
+badValues="$(extract '[.args | to_entries[] | select(([.value[] | type == "object"] | all) | not) | .key] | join(",")')"
+if [[ -n "$badValues" ]]; then
+  echo "$(basename $0): ERROR! every entry of an \`.args\` array must be an" \
+    "argument object; offending key(s): ${badValues}" >&2
+  exit 1
+fi
+
 # Check that `order` values are either -1 (independent) or positive
 # integers; `0`, other negative values, and non-integers are invalid
 badValues="$(extract '[.order | to_entries[] | (.value | tostring) as $value | select(($value | test("^-1$|^[1-9][0-9]*$")) | not) | .key] | join(",")')"
@@ -224,7 +235,7 @@ fi
 mapfile -t allProcesses < <(extract '.exec | keys | .[]')
 for sec in "${allProcesses[@]}"; do
 
-  submission_script=$(jq -r ".submission.${sec}" "$conf")
+  submission_script=$(jq -r ".submission[\"${sec}\"]" "$conf")
   if [[ "$submission_script" != "" ]]; then
     if [[ ! -f "$submission_script" || ! -r "$submission_script" ]]; then
       echo "$(basename $0): ERROR! the submission template of \`${sec}\` is" \
@@ -233,7 +244,7 @@ for sec in "${allProcesses[@]}"; do
     fi
   fi
 
-  executable=$(extract ".exec.${sec}")
+  executable=$(extract ".exec[\"${sec}\"]")
   executable_bin="${executable%% *}"
   if [[ "$executable_bin" == */* && ! -x "$executable_bin" ]]; then
     echo "$(basename $0): ERROR! the executable of \`${sec}\` is not an" \
@@ -257,13 +268,13 @@ mapfile -t indeps < <(extract "select_independants(.order)")
 for sec in "${indeps[@]}"; do
 
   # select the executable and related arguments
-  executable=$(extract ".exec.${sec}")
+  executable=$(extract ".exec[\"${sec}\"]")
 
   # check how many sets of `args` are provided for each `section`
-  iters=$(extract "count(.args.${sec})")
+  iters=$(extract "count(.args[\"${sec}\"])")
 
   # submission script provided?
-  submission_script=$(jq -r ".submission.${sec}" "$conf")
+  submission_script=$(jq -r ".submission[\"${sec}\"]" "$conf")
 
   # iterate over the `args` provided in each `section`
   for i in $(seq 1 $iters); do
@@ -271,10 +282,10 @@ for sec in "${indeps[@]}"; do
     idx=$(( i - 1 )) # since JSON/jq array indices start from 0
 
     # argument value
-    arg=$(extract "[parse_args(.args.${sec}[$idx])] | join(\"\")" | tr -d '\n')
+    arg=$(extract "[parse_args(.args[\"${sec}\"][$idx])] | join(\"\")" | tr -d '\n')
 
     # submit the independent invocation without any dependency
-    if ! submit_job "$submission_script" "$executable" "$arg" ""; then
+    if ! submit_job "$submission_script" "$executable" "$arg" "" "${sec}_${i}"; then
       echo "$(basename $0): ERROR! submission of independant :${sec}:#${i}" \
         "failed" >&2
       exit 1
@@ -326,24 +337,24 @@ for level in "${ordered_levels[@]}"; do
   for sec in "${level_processes[@]}"; do
 
     # select executable and run the process
-    executable=$(extract ".exec.${sec}")
+    executable=$(extract ".exec[\"${sec}\"]")
 
     # check number of iterations required for each process
-    sub_iters=$(extract "count(.args.${sec})")
+    sub_iters=$(extract "count(.args[\"${sec}\"])")
 
     # submission script provided?
-    submission_script=$(jq -r ".submission.${sec}" "$conf")
+    submission_script=$(jq -r ".submission[\"${sec}\"]" "$conf")
 
     for sub_iter in $(seq 1 $sub_iters); do
       # jq array index starts from 0
       sub_idx="$(( $sub_iter - 1 ))"
 
       # argument
-      arg=$(extract "[parse_args(.args.${sec}[$sub_idx])] | join(\"\")" | tr -d '\n')
+      arg=$(extract "[parse_args(.args[\"${sec}\"][$sub_idx])] | join(\"\")" | tr -d '\n')
 
       # submit the invocation; a failed submission stops the workflow
       # before any dependent job is submitted
-      if ! submit_job "$submission_script" "$executable" "$arg" "$dependency_ids"; then
+      if ! submit_job "$submission_script" "$executable" "$arg" "$dependency_ids" "${sec}_${sub_iter}"; then
         echo "$(basename $0): ERROR! submission of :${sec}:#${sub_iter} at" \
           "level ${level} failed; no dependent job is submitted" >&2
         exit 1

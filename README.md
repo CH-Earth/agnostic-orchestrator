@@ -30,7 +30,8 @@ and `gistool`'s `extract-gis.sh`), or through a submission template that
 is provided in the `submission` section of the configuration file
 (e.g., `easymore.slurm`, `mesh.slurm`). A timestamped log file is created
 next to the script, and the submission templates used in every run are
-cached in `${HOME}/.orchestrator/orchestration_<date>`.
+cached in `${HOME}/.orchestrator/orchestration_<date>_<pid>`; the
+process-unique suffix keeps concurrent runs apart.
 
 
 # Requirements
