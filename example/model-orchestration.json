@@ -1,0 +1,223 @@
+{
+  "exec": {
+    "geofabric": "/path/to/model-agnostic-framework-publication/1-geofabric/geospatial-fabric-modifier.py",
+    "met": "/path/to/datatool/extract-dataset.sh",
+    "gis": "/path/to/gistool/extract-gis.sh",
+    "remap": "easymore cli",
+    "meshflow": "meshflow",
+    "summaflow": "summaflow",
+    "fuseflow": "fuseflow",
+    "marrmotflow": "marrmotflow",
+    "hypeflow": "hypeflow",
+    "tar": "tar",
+    "rm": "rm"
+  },
+
+  "args": {
+    "geofabric": [{
+        "fabric_code": "CATCHMENT",
+        "output_root_path": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/shapefiles/"
+    }],
+    "met": [{
+      "dataset": "CaSR",
+      "dataset-dir": "/work/comphyd_lab/data/meteorological-data/casrv3.1/",
+      "variable": [
+        "CaSR_v3.1_P_P0_SFC",
+        "CaSR_v3.1_P_TT_09975",
+        "CaSR_v3.1_P_UVC_09975",
+        "CaSR_v3.1_A_PR0_SFC",
+        "CaSR_v3.1_P_FB_SFC",
+        "CaSR_v3.1_P_FI_SFC",
+        "CaSR_v3.1_P_HU_09975"
+      ],
+      "output-dir": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/forcings/datatool-outputs",
+      "start-date": "1980-01-01T00:00:00",
+      "end-date": "1984-12-31T23:00:00",
+      "lat-lims": "",
+      "lon-lims": "",
+      "shape-file": "/work/comphyd_lab/data/_to-be-moved/camels-spat-upload/shapefiles/headwater/shapes-distributed/CATCHMENT/CATCHMENT_distributed_basin.shp",
+      "model": "",
+      "ensemble": "",
+      "prefix": "CATCHMENT_",
+      "email": "",
+      "cluster": "/path/to/datatool/etc/clusters/ucalgary-arc.json",
+      "cache": "$TMPDIR",
+      "_flags": [
+        "submit-job",
+        "parsable"
+      ]
+    }],
+
+    "gis": [{
+      "dataset": "MODIS",
+      "dataset-dir": "/work/comphyd_lab/data/geospatial-data/MODIS",
+      "variable": "MCD12Q1.061",
+      "start-date": "2020-01-01",
+      "end-date": "2020-01-01",
+      "output-dir": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/attributes/landcover/",
+      "lat-lims": "",
+      "lon-lims": "",
+      "shape-file": "/work/comphyd_lab/data/_to-be-moved/camels-spat-upload/shapefiles/headwater/shapes-distributed/CATCHMENT/CATCHMENT_distributed_basin.shp",
+      "print-geotiff": "true",
+      "stat": [
+        "frac",
+        "coords",
+        "majority"
+      ],
+      "quantile": "",
+      "prefix": "CATCHMENT_",
+      "email": "",
+      "fid": "COMID",
+      "cache": "$TMPDIR",
+      "cluster": "/path/to/gistool/etc/clusters/ucalgary-arc.json",
+      "_flags": [
+        "include-na",
+        "submit-job",
+        "parsable"
+      ]
+    },
+    {
+      "dataset": "MERIT-Hydro",
+      "dataset-dir": "/work/comphyd_lab/data/geospatial-data/MERIT-Hydro",
+      "variable": "elv",
+      "start-date": "",
+      "end-date": "",
+      "output-dir": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/attributes/elevation/",
+      "lat-lims": "",
+      "lon-lims": "",
+      "shape-file": "/work/comphyd_lab/data/_to-be-moved/camels-spat-upload/shapefiles/headwater/shapes-distributed/CATCHMENT/CATCHMENT_distributed_basin.shp",
+      "print-geotiff": "true",
+      "stat": [
+        "mean",
+        "coords",
+        "majority"
+      ],
+      "quantile": "",
+      "prefix": "CATCHMENT_",
+      "email": "",
+      "fid": "COMID",
+      "cache": "$TMPDIR",
+      "cluster": "/path/to/gistool/etc/clusters/ucalgary-arc.json",
+      "_flags": [
+        "include-na",
+        "submit-job",
+        "parsable"
+      ]
+    },
+    {
+      "dataset": "soil_class",
+      "dataset-dir": "/work/comphyd_lab/data/geospatial-data/soil_classes",
+      "variable": "soil_classes",
+      "start-date": "",
+      "end-date": "",
+      "output-dir": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/attributes/soil/",
+      "lat-lims": "",
+      "lon-lims": "",
+      "shape-file": "/work/comphyd_lab/data/_to-be-moved/camels-spat-upload/shapefiles/headwater/shapes-distributed/CATCHMENT/CATCHMENT_distributed_basin.shp",
+      "print-geotiff": "true",
+      "stat": [
+        "frac",
+        "coords",
+        "majority"
+      ],
+      "quantile": "",
+      "prefix": "CATCHMENT_",
+      "email": "",
+      "fid": "COMID",
+      "cache": "$TMPDIR",
+      "cluster": "/path/to/gistool/etc/clusters/ucalgary-arc.json",
+      "_flags": [
+        "include-na",
+        "submit-job",
+        "parsable"
+      ]
+    }],
+    "remap": [{
+      "case-name": "averaged",
+      "cache": "$TMPDIR/",
+      "shapefile": "/work/comphyd_lab/data/_to-be-moved/camels-spat-upload/shapefiles/headwater/shapes-distributed/CATCHMENT/CATCHMENT_distributed_basin.shp",
+      "shapefile-id": "COMID",
+      "source-nc": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/forcings/datatool-outputs/**/*.nc*",
+      "variable-lon": "lon",
+      "variable-lat": "lat",
+      "variable": [
+        "CaSR_v3.1_P_P0_SFC",
+        "CaSR_v3.1_P_TT_09975",
+        "CaSR_v3.1_P_UVC_09975",
+        "CaSR_v3.1_A_PR0_SFC",
+        "CaSR_v3.1_P_FB_SFC",
+        "CaSR_v3.1_P_FI_SFC",
+        "CaSR_v3.1_P_HU_09975"
+      ],
+      "remapped-var-id": "COMID",
+      "remapped-dim-id": "COMID",
+      "output-dir": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/forcings/easymore-outputs/",
+      "job-conf": "",
+      "_flags": []
+    }],
+    "meshflow": [{
+      "json": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/mesh.json",
+      "output-path": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/models/mesh/"
+    }],
+    "summaflow": [{
+      "json": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/summa.json",
+      "output-path": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/models/summa/"
+    }],
+    "fuseflow": [{
+      "json": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/fuse.json",
+      "output-path": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/models/fuse/"
+    }],
+    "marrmotflow": [{
+      "json": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/marrmot.json",
+      "output-path": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/models/marrmot/"
+    }],
+    "hypeflow": [{
+      "json": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/hype.json",
+      "output-path": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/models/hype/"
+    }],
+    "tar": [{
+      "file": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT.tar",
+      "directory": "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/",
+      "_arguments": [
+        "."
+      ],
+      "_flags": [
+        "create"
+      ]
+    }],
+    "rm": [{
+      "_arguments": [
+        "/path/to/model-agnostic-framework-publication/5-outputs/CATCHMENT/"
+      ],
+      "_flags": [
+        "recursive"
+      ]
+    }]
+  },
+  "order": {
+    "geofabric": 1,
+    "met": 3,
+    "gis": 2,
+    "remap": 4,
+    "meshflow": 5,
+    "summaflow": 6,
+    "fuseflow": 7,
+    "marrmotflow": 8,
+    "hypeflow": 9,
+    "tar": 10,
+    "rm": 11
+  },
+  "submission": {
+    "geofabric": "/path/to/model-agnostic-framework-publication/1-geofabric/geofabric.slurm",
+    "met": "",
+    "gis": "",
+    "remap": "/path/to/model-agnostic-framework-publication/2-model-agnostic/easymore.slurm",
+    "meshflow": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/mesh.slurm",
+    "summaflow": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/summa.slurm",
+    "fuseflow": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/fuse.slurm",
+    "marrmotflow": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/marrmot.slurm",
+    "hypeflow": "/path/to/model-agnostic-framework-publication/3-model-specific/CATCHMENT/hype.slurm",
+    "tar": "/path/to/model-agnostic-framework-publication/etc/tar.slurm",
+    "rm": "/path/to/model-agnostic-framework-publication/etc/rm.slurm"
+  }
+}
