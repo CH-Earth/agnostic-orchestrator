@@ -248,7 +248,9 @@ done
 # Running executables 
 #####################
 # first execute those with `order` value of `-1` (i.e., independent
-# processes)
+# processes); they are submitted through the same template or interface
+# as the first level, but without any dependency, and their submission
+# IDs are only recorded in the log, never used as dependencies
 # Tip: `indeps` is an array containing "independent" processes
 mapfile -t indeps < <(extract "select_independants(.order)")
 
@@ -260,27 +262,38 @@ for sec in "${indeps[@]}"; do
   # check how many sets of `args` are provided for each `section`
   iters=$(extract "count(.args.${sec})")
 
+  # submission script provided?
+  submission_script=$(jq -r ".submission.${sec}" "$conf")
+
   # iterate over the `args` provided in each `section`
   for i in $(seq 1 $iters); do
     # index
     idx=$(( i - 1 )) # since JSON/jq array indices start from 0
 
     # argument value
-    arg=$(extract "parse_args(.args.${sec}[$idx])")
+    arg=$(extract "[parse_args(.args.${sec}[$idx])] | join(\"\")" | tr -d '\n')
 
-    # submission script provided?
-    submission_script=$(jq -r ".submission.${sec}" $conf)
+    # submit the independent invocation without any dependency
+    if ! submit_job "$submission_script" "$executable" "$arg" ""; then
+      echo "$(basename $0): ERROR! submission of independant :${sec}:#${i}" \
+        "failed" >&2
+      exit 1
+    fi
+    job_id="$submitted_job_id"
 
-    # executing
-    if [[ "$submission_script" != "" ]]; then
-      sbatch ${submission_script} --wrap "${executable} ${arg} >> ${log} 2>&1)"
-    else
-      $executable $arg 2>> $log;
+    # a submission must return a parsable SLURM job ID
+    if ! valid_job_id "$job_id"; then
+      echo "$(basename $0): ERROR! submission of independant :${sec}:#${i}" \
+        "did not return a valid job ID: \`${job_id}\`" >&2
+      exit 1
     fi
 
+    # machine-readable submission record in the log file
+    log_submission "-1" "$sec" "$i" "$iters" "" "$job_id"
+
     # relevant message
-    echo "$(basename $0): Script for independant :${sec}:#${i} process" \
-      "is executed"
+    echo "$(basename $0): Script for independant :${sec}:#${i} process is" \
+      "executed with SLURM job ID ${job_id}"
 
   done
 done

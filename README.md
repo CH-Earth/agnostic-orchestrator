@@ -144,9 +144,10 @@ Two special keys are supported inside every argument object:
 Every entry in `order` describes how the corresponding process takes part
 in the workflow:
 
-  1. `order = -1`: the process is independent; it is submitted without
-     any dependency, and its submission IDs are not part of the ordered
-     hierarchy.
+  1. `order = -1`: the process is independent; it is submitted through
+     the same template or interface as the first level, but without any
+     dependency, and its submission IDs are recorded in the log only and
+     are not part of the ordered hierarchy.
   2. Positive integers: the process takes part in the layered, ordered
      hierarchy. Every distinct positive `order` value is an execution
      level, and levels are submitted in ascending order. All invocations
@@ -173,7 +174,8 @@ Processes are submitted either through a submission template (the
      an `srun` line before the template is passed to `sbatch`.
   2. Interface-based processes are expected to submit the job to the
      scheduler themselves, and their interfaces must accept `--parsable`
-     and `--dependency=<id1:id2:...>` arguments, where the value is a
+     (and `--dependency=<id1:id2:...>` for ordered processes beyond the
+     first level) arguments, where the dependency value is a
      colon-separated list of job IDs, similar to `datatool`'s
      `extract-dataset.sh` and `gistool`'s `extract-gis.sh`.
 
