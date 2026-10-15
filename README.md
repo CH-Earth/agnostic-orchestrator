@@ -140,6 +140,65 @@ Two special keys are supported inside every argument object:
   2. `_arguments`: an array of positional arguments that is appended at the
      end of the argument list.
 
+# Execution semantics
+Every entry in `order` describes how the corresponding process takes part
+in the workflow:
+
+  1. `order = -1`: the process is independent; it is submitted without
+     any dependency, and its submission IDs are not part of the ordered
+     hierarchy.
+  2. Positive integers: the process takes part in the layered, ordered
+     hierarchy. Every distinct positive `order` value is an execution
+     level, and levels are submitted in ascending order. All invocations
+     of a level may run concurrently once every invocation of the
+     immediately preceding level has completed successfully. Every
+     invocation of a level receives a SLURM `afterok` dependency on all
+     submission IDs produced by the preceding level only; invocations
+     within the same level, including multiple argument objects of the
+     same process, never depend on each other.
+
+For example, in a configuration with `met: 3`, `gis: 2`, and `remap: 4`,
+the `gis` jobs are submitted first, the `met` job is submitted with a
+success dependency on the `gis` job IDs, and the `remap` job is submitted
+with a success dependency on the `met` job ID.
+
+Processes are submitted either through a submission template (the
+`submission` section) or through their own executable interface (an empty
+`submission` value):
+
+  1. Submission templates are copied into the cache directory; a
+     `#SBATCH --parsable` directive, and (for ordered processes beyond
+     the first level) a `#SBATCH --dependency=afterok:id1:id2:...`
+     directive are inserted, and the process invocation is appended as
+     an `srun` line before the template is passed to `sbatch`.
+  2. Interface-based processes are expected to submit the job to the
+     scheduler themselves, and their interfaces must accept `--parsable`
+     and `--dependency=<id1:id2:...>` arguments, where the value is a
+     colon-separated list of job IDs, similar to `datatool`'s
+     `extract-dataset.sh` and `gistool`'s `extract-gis.sh`.
+
+A SLURM `afterok` dependency makes a job *eligible* to run only after all
+of its parent jobs have completed successfully. If a parent job fails,
+its dependent jobs remain ineligible and are never run. The orchestrator
+does not monitor, retry, or restart submitted jobs.
+
+# Configuration checks
+Before any job is submitted, the orchestrator verifies that:
+  1. all four sections (`exec`, `args`, `order`, `submission`) are
+     provided and define exactly the same component keys,
+  2. `exec` values are non-empty strings, `args` values are arrays of
+     argument objects, and `submission` values are strings (an empty
+     string indicates an interface-based process),
+  3. `order` values are either `-1` or positive integers (`0` and
+     negative values other than `-1` are invalid),
+  4. submission templates are readable files, and path-like executables
+     exist and are executable.
+
+A failed submission, or a submission that does not return a parsable
+SLURM job ID, stops the orchestrator before any dependent job of the
+next level is submitted. Every submission is recorded in the log file in
+a machine-readable `event=submit ...` line.
+
 # Executation
 The "Agnostic Orchestrator" can be run as following:
 ```console
@@ -151,6 +210,15 @@ An example to prepare meteorological and geospatial datasets for the
 `CATCHMENT` geospatial fabric of the model-agnostic framework publication,
 and to run the model-specific workflows, is given in the
 [example](./example) directory of the current repository.
+
+# Limitations
+The current implementation purposely keeps the workflow semantics simple:
+  1. no monitoring of submitted jobs,
+  2. no retry, rebound, restart, or resume of failed or interrupted jobs,
+  3. dependencies are expressed as scalar `order` ranks that build a
+     layered workflow graph; arbitrary user-declared parent-child
+     dependencies are not supported,
+  4. scheduling is fully delegated to SLURM after submission.
 
 # Support
 Please open a new ticket on the Issues tab of the current repository in case of any problem.

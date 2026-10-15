@@ -24,6 +24,13 @@ submitted through their own executable interface (empty `submission`
 values), and processes that are submitted through SLURM submission
 templates (e.g., `geofabric.slurm`, `easymore.slurm`).
 
+Because `gis` holds three argument objects while `order` is a scalar, all
+three `gis` invocations belong to the same execution level: they are
+submitted with an identical dependency on the `geofabric` job only, and
+they do not depend on each other. The `met` workflow is then submitted
+with a dependency on all three `gis` job IDs, and the same level logic
+applies to the remaining workflows.
+
 Paths of the form `/path/to/...` are placeholders and must be adapted to
 the target system. Input data paths of the form `/work/comphyd_lab/...`
 are those of the publication's data on Digital Research Alliance of

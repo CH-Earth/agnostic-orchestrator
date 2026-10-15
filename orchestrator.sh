@@ -22,15 +22,15 @@ conf="$1"
 dateLog="$(date +'%Y%m%d_%H%M%S')"
 
 # global variables
-log="$(dirname $0)/orchestrator_${dateLog}.log"
-log="$(realpath $(dirname $0)/orchestrator_${dateLog}.log)"
+log="$(dirname "$0")/orchestrator_${dateLog}.log"
+log="$(realpath "$(dirname "$0")/orchestrator_${dateLog}.log")"
 
 # Main message
 echo "$(basename $0): Model-agnostic workflow job submission to SLURM scheduler"
 
 # create log file
 if [[ -e $log ]]; then
-  rm $log
+  rm "$log"
 fi
 
 # create log file
@@ -50,11 +50,89 @@ echo "$(basename $0): job logs are in ${cache}"
 #####################################
 # Necessary functions and definitions
 #####################################
-jqScript="$(dirname $0)/assets/json-funcs.jq"
+jqScript="$(dirname "$0")/assets/json-funcs.jq"
 
 extract () {
   local func=$1
-  jq -r "$(cat $jqScript) $func" $conf;
+  jq -r "$(cat "$jqScript") $func" "$conf";
+}
+
+# join a list of values into a colon-separated string (SLURM expects
+# `afterok:id1:id2:...` when a job depends on several jobs); the result
+# is stored in the variable whose name is passed as the first argument,
+# without changing the global IFS
+join_ids () {
+  local variable=$1
+  shift
+  local IFS=':'
+  local joined="$*"
+  printf -v "$variable" '%s' "$joined"
+}
+
+# submit a single invocation and store the returned SLURM job ID in the
+# global `submitted_job_id` variable; returns non-zero when the
+# submission command itself fails
+submit_job () {
+  local submission_script=$1
+  local executable=$2
+  local arg=$3
+  local dependency_ids=$4
+  local submission_script_name parsable_line dependency_line
+
+  if [[ "$submission_script" != "" ]]; then
+    # Prepare the line that needs to be added to the SLURM submission
+    # script
+    parsable_line="#SBATCH --parsable"
+
+    # Make a temporary file in the cache
+    submission_script_name="$(basename "$submission_script")"
+    cp "$submission_script" "${cache}/${submission_script_name}"
+
+    # add the prepared line(s) to the file; the dependency line is only
+    # added for invocations that have parent jobs
+    if [[ -n "$dependency_ids" ]]; then
+      dependency_line="#SBATCH --dependency=afterok:${dependency_ids}"
+      sed -i "2i\\${dependency_line}" "${cache}/${submission_script_name}"
+      sed -i "3i\\${parsable_line}" "${cache}/${submission_script_name}"
+    else
+      sed -i "2i\\${parsable_line}" "${cache}/${submission_script_name}"
+    fi
+    echo "srun ${executable} ${arg} 2>> ${log}" >> "${cache}/${submission_script_name}"
+
+    # execute the script
+    submitted_job_id="$(sbatch "${cache}/${submission_script_name}")"
+
+  else
+    # execute the script as is, the script must accept --parsable and
+    # --dependency
+    if [[ -n "$dependency_ids" ]]; then
+      submitted_job_id="$(${executable} --parsable ${arg} --dependency="${dependency_ids}" 2>> "$log")"
+    else
+      submitted_job_id="$(${executable} --parsable ${arg} 2>> "$log")"
+    fi
+
+  fi
+
+  return $?
+}
+
+# a parsable SLURM job ID is either `jobid` or `jobid;cluster`
+valid_job_id () {
+  local job_id=$1
+  local job_id_pattern='^[0-9]+(;[[:alnum:]_.-]+)?$'
+  [[ $job_id =~ $job_id_pattern ]]
+}
+
+# append a machine-readable submission record to the log file
+log_submission () {
+  local level=$1
+  local section=$2
+  local invocation=$3
+  local total=$4
+  local dependency_ids=$5
+  local job_id=$6
+  local record="event=submit timestamp=$(date +'%Y-%m-%dT%H:%M:%S%z') level=${level} process=${section} invocation=${invocation}/${total} dependency_ids=${dependency_ids:--} job_id=${job_id}"
+  printf '%s\n' "$record" >> "$log"
 }
 
 # The `model-agnostic.json` file consists of four main sections
@@ -63,40 +141,105 @@ extract () {
 #   3. order: where the order of each section for execution is given
 #   4. submission: where the submission script for the elements are provided
 
-# Register the main keys of $conf: `exec`, `args`, and `order`
+# Register the main keys of $conf: `exec`, `args`, `order`, `submission`
 mainKeys=("exec" "args" "order" "submission")
-# Reading the sub-keys from any element of $mainKeys 
-mapfile -t subKeys < <(jq -r ".${mainKeys[0]} | keys[]" ${conf})
 
 
 ################################
 # Checking requirements of $conf
 ################################
-# Check the `length` of each key and if unequal, throw an error
-initCount=$(extract "count(.${mainKeys[0]})")
+# Check that all main sections are provided in $conf
 for key in "${mainKeys[@]}"; do
-  c=$(extract "count(.${key})")
-  if [[ $c -ne $initCount ]]; then
-    echo "$(basename $0): ERROR! The arguments provided in main arrays"
-      "are not equal"
-      exit 1;
+  if [[ "$(jq -r "has(\"${key}\")" "$conf")" != "true" ]]; then
+    echo "$(basename $0): ERROR! the \`${key}\` section is missing in ${conf}" >&2
+    exit 1
   fi
 done
 
-# Check if the $mainKeys are provided in $conf
-mapfile -t derivedKeys< <(jq -r "keys[]" ${conf})
-
+# Check that no unknown top-level keys are provided in $conf
+mapfile -t derivedKeys < <(jq -r "keys[]" "$conf")
 for key in "${derivedKeys[@]}"; do
+  found=false
   for mainKey in "${mainKeys[@]}"; do
-    if [[ "${key,,}" == "${mainKey,,}" ]]; then
-      break 2
+    if [[ "${key}" == "${mainKey}" ]]; then
+      found=true
+      break
     fi
   done
+  if [[ "${found}" == "false" ]]; then
+    echo "$(basename $0): ERROR! \`${key}\` is not a valid top-level key in ${conf}" >&2
+    echo "$(basename $0): valid top-level keys are: ${mainKeys[*]}" >&2
+    exit 1
+  fi
+done
 
-  # if break does not happen, throw an error
-  echo "$(basename $0): ERROR! \`$key\` is not found in $conf"
-  echo "key is ${key} and mainKey is ${mainKey}"
-  exit 1;
+# Check that every section defines the same component keys
+execKeys="$(extract '.exec | keys | join(",")')"
+for key in "${mainKeys[@]}"; do
+  sectionKeys="$(extract ".${key} | keys | join(\",\")")"
+  if [[ "$sectionKeys" != "$execKeys" ]]; then
+    echo "$(basename $0): ERROR! the component keys of \`.${key}\` do not" \
+      "match the ones of \`.exec\` in ${conf}" >&2
+    echo "$(basename $0): \`.exec\` keys: ${execKeys}" >&2
+    echo "$(basename $0): \`.${key}\` keys: ${sectionKeys}" >&2
+    exit 1
+  fi
+done
+
+# Check the value types of every section
+badValues="$(extract '[.exec | to_entries[] | select((.value | type) != "string" or .value == "") | .key] | join(",")')"
+if [[ -n "$badValues" ]]; then
+  echo "$(basename $0): ERROR! \`.exec\` values must be non-empty strings," \
+    "one for every process; offending key(s): ${badValues}" >&2
+  exit 1
+fi
+
+badValues="$(extract '[.submission | to_entries[] | select((.value | type) != "string") | .key] | join(",")')"
+if [[ -n "$badValues" ]]; then
+  echo "$(basename $0): ERROR! \`.submission\` values must be strings" \
+    "(use \"\" when a process runs through its own interface);" \
+    "offending key(s): ${badValues}" >&2
+  exit 1
+fi
+
+badValues="$(extract '[.args | to_entries[] | select((.value | type) != "array") | .key] | join(",")')"
+if [[ -n "$badValues" ]]; then
+  echo "$(basename $0): ERROR! \`.args\` values must be arrays of" \
+    "argument objects; offending key(s): ${badValues}" >&2
+  exit 1
+fi
+
+# Check that `order` values are either -1 (independent) or positive
+# integers; `0`, other negative values, and non-integers are invalid
+badValues="$(extract '[.order | to_entries[] | (.value | tostring) as $value | select(($value | test("^-1$|^[1-9][0-9]*$")) | not) | .key] | join(",")')"
+if [[ -n "$badValues" ]]; then
+  echo "$(basename $0): ERROR! \`.order\` values must be -1 for independent" \
+    "processes or positive integers for ordered processes;" \
+    "offending key(s): ${badValues}" >&2
+  exit 1
+fi
+
+# Check that submission templates and path-like executables exist
+# before any job is submitted
+mapfile -t allProcesses < <(extract '.exec | keys | .[]')
+for sec in "${allProcesses[@]}"; do
+
+  submission_script=$(jq -r ".submission.${sec}" "$conf")
+  if [[ "$submission_script" != "" ]]; then
+    if [[ ! -f "$submission_script" || ! -r "$submission_script" ]]; then
+      echo "$(basename $0): ERROR! the submission template of \`${sec}\` is" \
+        "not a readable file: ${submission_script}" >&2
+      exit 1
+    fi
+  fi
+
+  executable=$(extract ".exec.${sec}")
+  executable_bin="${executable%% *}"
+  if [[ "$executable_bin" == */* && ! -x "$executable_bin" ]]; then
+    echo "$(basename $0): ERROR! the executable of \`${sec}\` is not an" \
+      "executable file: ${executable_bin}" >&2
+    exit 1
+  fi
 
 done
 
@@ -143,109 +286,81 @@ for sec in "${indeps[@]}"; do
 done
 
 
-# second execute those with `order` value of greater than 1 (i.e.,
-# dependant) and ordered monotonically
-# Tip: `deps` is in array containing "dependant" processes 
-mapfile -t deps < <(extract "select_dependants(.order)")
+# second execute those with a positive `order` value (i.e., dependant
+# processes); distinct `order` values define execution levels, and every
+# invocation of a level is only eligible to run after all invocations of
+# the immediately preceding level have completed successfully
+mapfile -t ordered_levels < <(extract "select_levels(.order)")
 
-# number of iterations needed, with each iterations being the parent
-# process of the next one
-dep_iters="${#deps[@]}"
+# submission IDs of the preceding level; empty for the first level
+parent_ids=()
 
-# make an empty ID array to keep track of submitted SLURM jobs
-ID=()
+for level in "${ordered_levels[@]}"; do
 
-for iter in $(seq 1 $dep_iters); do
-  # index in Bash arrays start from 0 
-  idx=$(( $iter - 1 ))
+  # submission IDs collected while submitting the current level
+  level_ids=()
 
-  # make the $sec variable based on $idx and $deps
-  sec="${deps[$idx]}"
+  # processes whose `order` value equals the current level
+  mapfile -t level_processes < <(extract "select_processes(.order; ${level})")
 
-  # select executable and run the process
-  executable=$(extract ".exec.${sec}")
- 
-  # check number of iterations required for each `$deps` process
-  sub_iters=$(extract "count(.args.${sec})")
+  # all invocations of this level share the same dependency: the
+  # complete set of submission IDs from the preceding level only
+  dependency_ids=""
+  if [[ ${#parent_ids[@]} -gt 0 ]]; then
+    join_ids dependency_ids "${parent_ids[@]}"
+  fi
 
-  for sub_iter in $(seq 1 $sub_iters); do
-    # jq array index starts from 0
-    sub_idx="$(( $sub_iter - 1 ))"
+  for sec in "${level_processes[@]}"; do
 
-    # argument
-    arg=$(extract "[parse_args(.args.${sec}[$sub_idx])] | join(\"\")" | tr -d '\n')
+    # select executable and run the process
+    executable=$(extract ".exec.${sec}")
+
+    # check number of iterations required for each process
+    sub_iters=$(extract "count(.args.${sec})")
 
     # submission script provided?
-    submission_script=$(jq -r ".submission.${sec}" $conf)
+    submission_script=$(jq -r ".submission.${sec}" "$conf")
 
-    # executation part 
-    # if parent process
-    if [[ $idx -eq 0 ]]; then
-      # argument value
-      # save SLURM submission ID(s)
-      if [[ "$submission_script" != "" ]]; then
-        # Prepare the line that needs to be added to the SLURM submission
-        # script
-        parse_line="#SBATCH --parsable"
-        eval_line="srun ${executable} ${arg} 2>> ${log}"
+    for sub_iter in $(seq 1 $sub_iters); do
+      # jq array index starts from 0
+      sub_idx="$(( $sub_iter - 1 ))"
 
-        # Make a temporary file in the cache
-        submission_script_name="$(basename ${submission_script})"
-        cp "${submission_script}" "${cache}/${submission_script_name}"
+      # argument
+      arg=$(extract "[parse_args(.args.${sec}[$sub_idx])] | join(\"\")" | tr -d '\n')
 
-        # add the prepared line to the end of the file
-        sed -i "2i\\${parse_line}" "${cache}/${submission_script_name}"
-        echo "${eval_line}" >> "${cache}/${submission_script_name}"
+      # submit the invocation; a failed submission stops the workflow
+      # before any dependent job is submitted
+      if ! submit_job "$submission_script" "$executable" "$arg" "$dependency_ids"; then
+        echo "$(basename $0): ERROR! submission of :${sec}:#${sub_iter} at" \
+          "level ${level} failed; no dependent job is submitted" >&2
+        exit 1
+      fi
+      job_id="$submitted_job_id"
 
-        # execute the script
-        ID+=("$(sbatch ${cache}/${submission_script_name})")
-
-      else
-        ID+=("$(${executable} --parsable ${arg})")
-
+      # a submission must return a parsable SLURM job ID
+      if ! valid_job_id "$job_id"; then
+        echo "$(basename $0): ERROR! submission of :${sec}:#${sub_iter} at" \
+          "level ${level} did not return a valid job ID: \`${job_id}\`" >&2
+        exit 1
       fi
 
-      # print parent message
-      echo "$(basename $0): Script for :${sec}:#${sub_iter} process" \
-        "is executed as a parent process with ID ${ID[-1]}"
+      # keep the job ID as a dependency of the next level
+      level_ids+=("$job_id")
 
-    # if a child process
-    else
- 
-      # make comma delimited values of SLURM batch IDs
-      printf -v joined '%s,' "${ID[@]}"
-      csvID="$(echo "${joined%,}")"
+      # machine-readable submission record in the log file
+      log_submission "$level" "$sec" "$sub_iter" "$sub_iters" "$dependency_ids" "$job_id"
 
-      # submit child jobs dependant on the parent
-      if [[ "$submission_script" != "" ]]; then
-        # Prepare the line that needs to be added to the SLURM submission
-        # script
-        dependency_line="#SBATCH --dependency=afterok:${csvID}"
-        parsable_line="#SBATCH --parsable"
-        eval_line="srun ${executable} ${arg} 2>> ${log}"
+      # print submission message
+      echo "$(basename $0): Script for :${sec}:#${sub_iter} process is" \
+        "executed at level ${level} with parent ID(s) of ${dependency_ids:--}" \
+        "and SLURM job ID ${job_id}"
 
-        # Make a temporary file in the cache
-        submission_script_name="$(basename ${submission_script})"
-        cp "${submission_script}" "${cache}/${submission_script_name}"
-
-        # add the prepared line to the end of the file
-        sed -i "2i\\${dependency_line}" "${cache}/${submission_script_name}"
-        sed -i "3i\\${parsable_line}" "${cache}/${submission_script_name}"
-        echo "$eval_line" >> "${cache}/${submission_script_name}"
-
-        # execute the script
-        ID+=("$(sbatch ${cache}/${submission_script_name})")
-
-      else
-        # execute the script as is, the script must accept --dependency
-        ID+=("$(${executable} ${arg} --parsable --dependency="${csvID}" 2>> $log)")
-      fi
-
-      # print child message
-      echo "$(basename $0): Script for :${sec}: for the #${sub_iter}" \
-        "process is executed as a child process for parent process ID(s) of" \
-        "${csvID}"
-    fi
+    done
 
   done
+
+  # the jobs of the current level become the parents of the next level;
+  # independent (`order = -1`) job IDs are never added here
+  parent_ids=("${level_ids[@]}")
+
 done

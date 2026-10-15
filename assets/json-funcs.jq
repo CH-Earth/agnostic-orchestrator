@@ -28,10 +28,20 @@ def select_independants($array):
   .key
   ;
 
-def select_dependants($array):
-  array |
+def select_levels($array):
+  $array |
   to_entries |
-  map(select(.value > 0)) |
-  sort_by(.value) |
-  .[].key
+  map(.value | tostring) |
+  map(select(test("^[1-9][0-9]*$"))) |
+  map(tonumber) |
+  unique |
+  sort |
+  .[]
+  ;
+
+def select_processes($array; $level):
+  $array |
+  to_entries[] |
+  select((.value | tostring) == ($level | tostring)) |
+  .key
   ;
